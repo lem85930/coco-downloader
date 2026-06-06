@@ -8,8 +8,93 @@ import { cn } from "@/lib/utils";
 import { MusicItem } from "@/types/music";
 import { PlayerBar } from "@/components/PlayerBar";
 import { DownloadDrawer } from "@/components/DownloadDrawer";
+import { QualitySelectModal } from "@/components/QualitySelectModal";
 import { DownloadTask } from "@/types/download";
 import axios from "axios";
+
+type QualityOption = {
+  value: string;
+  label: string;
+  quality: string;
+  format: string;
+};
+
+type ProviderExtra = {
+  selectedQuality?: string;
+  selectedFormat?: string;
+  qualityOptions?: QualityOption[];
+};
+
+type QualityModalState = {
+  mode: "single" | "batch";
+  items: MusicItem[];
+  jooxCount: number;
+};
+
+function buildQualityValue(extra?: ProviderExtra) {
+  if (extra?.selectedQuality && extra?.selectedFormat) {
+    return `${extra.selectedQuality}:${extra.selectedFormat}`;
+  }
+  return extra?.qualityOptions?.[0]?.value || "";
+}
+
+function buildDownloadFilename(item: MusicItem) {
+  const cleanTitle = item.title.replace(/\s+/g, " ").trim();
+  const extra = getProviderExtra(item);
+  const extension = extra?.selectedFormat?.toLowerCase() || "mp3";
+  return `${cleanTitle}.${extension}`;
+}
+
+function collectQualityOptions(items: MusicItem[]) {
+  const map = new Map<string, QualityOption>();
+  for (const item of items) {
+    const options = getProviderExtra(item)?.qualityOptions || [];
+    for (const option of options) {
+      if (!map.has(option.value)) {
+        map.set(option.value, option);
+      }
+    }
+  }
+  return [...map.values()].sort((a, b) => Number(b.quality) - Number(a.quality));
+}
+
+function applyQualityChoice(item: MusicItem, value: string) {
+  if (item.provider !== "joox") return item;
+  const extra = getProviderExtra(item);
+  if (!extra) return item;
+  const match =
+    extra.qualityOptions?.find((option) => option.value === value) ||
+    extra.qualityOptions?.[0];
+  if (!match) return item;
+  return {
+    ...item,
+    extra: {
+      ...(item.extra as Record<string, unknown>),
+      selectedQuality: match.quality,
+      selectedFormat: match.format,
+    },
+  };
+}
+
+function getJooxItems(items: MusicItem[]) {
+  return items.filter((item) => (getProviderExtra(item)?.qualityOptions || []).length > 0);
+}
+
+function buildUrlRequest(item: MusicItem) {
+  const params = new URLSearchParams({
+    id: item.id,
+    provider: item.provider || "gequbao",
+  });
+  if (item.extra !== undefined) {
+    params.set("extra", JSON.stringify(item.extra));
+  }
+  return `/api/url?${params.toString()}`;
+}
+
+function getProviderExtra(item: MusicItem): ProviderExtra | undefined {
+  if (!item.extra || typeof item.extra !== "object") return undefined;
+  return item.extra as ProviderExtra;
+}
 
 const SourceLinkButton = ({ item }: { item: MusicItem }) => {
   const [loading, setLoading] = useState(false);
@@ -20,7 +105,7 @@ const SourceLinkButton = ({ item }: { item: MusicItem }) => {
     
     setLoading(true);
     try {
-      const res = await fetch(`/api/url?id=${item.id}&provider=${item.provider || 'gequbao'}`);
+      const res = await fetch(buildUrlRequest(item));
       const data = await res.json();
       if (data.url) {
         window.open(data.url, '_blank');
@@ -73,11 +158,12 @@ export default function Home() {
   const [downloadTasks, setDownloadTasks] = useState<DownloadTask[]>([]);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [downloadEnabled, setDownloadEnabled] = useState(true);
+  const [resolvingMusicId, setResolvingMusicId] = useState<string | null>(null);
+  const [qualityModal, setQualityModal] = useState<QualityModalState | null>(null);
+  const [selectedQualityValue, setSelectedQualityValue] = useState("");
 
   const openSourceUrl = async (item: MusicItem) => {
-    const res = await fetch(
-      `/api/url?id=${encodeURIComponent(item.id)}&provider=${encodeURIComponent(item.provider || "gequbao")}`
-    );
+    const res = await fetch(buildUrlRequest(item));
     const data = await res.json();
     if (data?.url) {
       window.open(data.url, "_blank");
@@ -149,6 +235,7 @@ export default function Home() {
   };
 
   const handlePlay = async (item: MusicItem) => {
+    if (resolvingMusicId === item.id) return;
     if (activeMusic?.id === item.id) {
       if (playing) {
         audioRef.current?.pause();
@@ -169,8 +256,9 @@ export default function Home() {
       syncShuffleIndex(item.id);
       setPlaying(false); // Wait for load
       setCurrentTime(0);
+      setResolvingMusicId(item.id);
 
-      const res = await fetch(`/api/url?id=${item.id}&provider=${item.provider || 'gequbao'}`);
+      const res = await fetch(buildUrlRequest(item));
       const data = await res.json();
       
       if (data.url && audioRef.current) {
@@ -182,9 +270,13 @@ export default function Home() {
         audioRef.current.src = data.url;
         audioRef.current.load();
         audioRef.current.play()
-          .then(() => setPlaying(true))
+          .then(() => {
+            setPlaying(true);
+            setResolvingMusicId(null);
+          })
           .catch(e => {
             console.error("Play failed", e);
+            setResolvingMusicId(null);
             const nextIndex = getNextIndexById(item.id);
             if (nextIndex >= 0) {
               handlePlay(results[nextIndex]);
@@ -194,6 +286,7 @@ export default function Home() {
             }
           });
       } else {
+        setResolvingMusicId(null);
         const nextIndex = getNextIndexById(item.id);
         if (nextIndex >= 0) {
           handlePlay(results[nextIndex]);
@@ -204,6 +297,7 @@ export default function Home() {
       }
     } catch (err) {
       console.error(err);
+      setResolvingMusicId(null);
       const nextIndex = getNextIndexById(item.id);
       if (nextIndex >= 0) {
         handlePlay(results[nextIndex]);
@@ -280,7 +374,8 @@ export default function Home() {
         params: {
           id: task.musicItem.id,
           provider: task.musicItem.provider || 'gequbao',
-          filename: task.fileName
+          filename: task.fileName,
+          extra: task.musicItem.extra ? JSON.stringify(task.musicItem.extra) : undefined,
         },
         responseType: 'blob',
         onDownloadProgress: (progressEvent) => {
@@ -316,25 +411,24 @@ export default function Home() {
     }
   };
 
-  const downloadOne = async (item: MusicItem) => {
+  const createTask = (item: MusicItem): DownloadTask => {
     const taskId = `${item.id}-${Date.now()}`;
-    const cleanTitle = item.title.replace(/\s+/g, ' ').trim();
-    const filename = `${cleanTitle}.mp3`;
-
-    // Add initial task
-    const newTask: DownloadTask = {
+    return {
       id: taskId,
       musicItem: item,
       status: 'pending',
       progress: 0,
-      fileName: filename,
+      fileName: buildDownloadFilename(item),
       startTime: Date.now()
     };
+  };
+
+  const startSingleDownload = async (item: MusicItem) => {
+    const newTask = createTask(item);
 
     setDownloadTasks(prev => [newTask, ...prev]);
     setIsDrawerOpen(true);
     
-    // Execute immediately for single download
     await executeDownload(newTask);
   };
 
@@ -356,33 +450,34 @@ export default function Home() {
     }
   };
 
-  const handleBatchDownload = async () => {
-    const items = results.filter(r => selectedIds.has(r.id));
-    if (items.length === 0) return;
-    
+  const openQualityModal = (items: MusicItem[], mode: "single" | "batch") => {
+    const jooxItems = getJooxItems(items);
+    if (jooxItems.length === 0) return false;
+    const options = collectQualityOptions(jooxItems);
+    if (options.length === 0) return false;
+    setSelectedQualityValue(buildQualityValue(getProviderExtra(jooxItems[0])) || options[0].value);
+    setQualityModal({
+      mode,
+      items,
+      jooxCount: jooxItems.length,
+    });
+    return true;
+  };
+
+  const startBatchDownload = async (items: MusicItem[]) => {
     if (items.length > 5) {
       if (!confirm(`即将下载 ${items.length} 首歌曲，可能需要一些时间，是否继续？`)) return;
     }
 
-    // 1. Create all tasks immediately
-    const newTasks: DownloadTask[] = items.map(item => {
-      const cleanTitle = item.title.replace(/\s+/g, ' ').trim();
-      return {
-        id: `${item.id}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        musicItem: item,
-        status: 'pending',
-        progress: 0,
-        fileName: `${cleanTitle}.mp3`,
-        startTime: Date.now()
-      };
-    });
+    const newTasks: DownloadTask[] = items.map((item) => ({
+      ...createTask(item),
+      id: `${item.id}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    }));
 
-    // 2. Add to state
     setDownloadTasks(prev => [...newTasks, ...prev]);
     setIsDrawerOpen(true);
     setDownloadingCount(items.length);
 
-    // 3. Process with concurrency limit
     const CONCURRENCY_LIMIT = 3;
     const queue = [...newTasks];
     const activePromises: Promise<void>[] = [];
@@ -410,6 +505,30 @@ export default function Home() {
 
     await processQueue();
     setDownloadingCount(0);
+  };
+
+  const requestDownloadOne = async (item: MusicItem) => {
+    if (openQualityModal([item], "single")) return;
+    await startSingleDownload(item);
+  };
+
+  const handleBatchDownload = async () => {
+    const items = results.filter(r => selectedIds.has(r.id));
+    if (items.length === 0) return;
+    if (openQualityModal(items, "batch")) return;
+    await startBatchDownload(items);
+  };
+
+  const confirmQualityDownload = async () => {
+    if (!qualityModal) return;
+    const items = qualityModal.items.map((item) => applyQualityChoice(item, selectedQualityValue));
+    const mode = qualityModal.mode;
+    setQualityModal(null);
+    if (mode === "single") {
+      await startSingleDownload(items[0]);
+      return;
+    }
+    await startBatchDownload(items);
   };
 
   const currentIndex = activeMusic ? results.findIndex(r => r.id === activeMusic.id) : -1;
@@ -534,15 +653,19 @@ export default function Home() {
              <Music className="w-4 h-4" />
              <span>选择搜索来源:</span>
           </div>
-          <div className="flex justify-center mb-6 gap-3 flex-wrap">
+          <div className="grid w-full max-w-6xl grid-cols-2 gap-3 sm:grid-cols-4 md:grid-cols-5 xl:grid-cols-7 mb-6">
             {[
               { id: 'gequbao', name: '歌曲宝' },
               { id: 'gequhai', name: '歌曲海' },
               { id: 'bugu', name: '布谷' },
+              { id: 'bodian', name: '波点' },
               { id: 'qq', name: 'QQ音乐' },
               { id: 'qqmp3', name: 'QQMP3' },
+              { id: 'mitu', name: '米兔' },
+              { id: 'joox', name: 'JOOX' },
               { id: 'migu', name: '咪咕' },
               { id: 'livepoo', name: '力音' },
+              { id: 'aiting', name: '爱听' },
               { id: 'jianbin-netease', name: '煎饼-网易' },
               { id: 'jianbin-qq', name: '煎饼-qq' },
               { id: 'jianbin-kugou', name: '煎饼-酷狗' },
@@ -553,7 +676,7 @@ export default function Home() {
                 type="button"
                 onClick={() => setProvider(p.id)}
                 className={cn(
-                  "px-4 py-2 rounded-full text-sm font-medium transition-all duration-300 cursor-pointer",
+                  "w-full px-3 py-2 rounded-full text-sm font-medium transition-all duration-300 cursor-pointer text-center",
                   provider === p.id 
                     ? "bg-sky-500 text-white shadow-lg shadow-sky-200 dark:shadow-none ring-2 ring-sky-200 dark:ring-sky-800 ring-offset-2 dark:ring-offset-slate-900" 
                     : "bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-100 dark:border-slate-800 hover:border-sky-200 dark:hover:border-sky-700"
@@ -650,7 +773,7 @@ export default function Home() {
               transition={{ delay: 0.2 }}
               className="mt-16 text-center text-slate-400 dark:text-slate-500 text-sm"
             >
-              <p>© 2024 COCO Music. Powered by Next.js & React.</p>
+              <p>© 2026 COCO Music. Powered by Next.js & React.</p>
               <p className="mt-2 text-xs text-slate-300 dark:text-slate-600">仅供个人学习交流使用，请勿用于商业用途</p>
             </motion.div>
           )}
@@ -762,7 +885,9 @@ export default function Home() {
                               "absolute inset-0 bg-black/20 flex items-center justify-center transition-opacity",
                               isActive ? "opacity-100" : "opacity-0 group-hover/cover:opacity-100"
                             )}>
-                              {isActive && playing ? (
+                              {resolvingMusicId === item.id ? (
+                                <Loader2 className="w-4 h-4 text-white animate-spin" />
+                              ) : isActive && playing ? (
                                 <Pause className="w-4 h-4 text-white fill-current" />
                               ) : (
                                 <Play className="w-4 h-4 text-white fill-current" />
@@ -783,14 +908,14 @@ export default function Home() {
                         </div>
 
                         <div className="text-slate-500 dark:text-slate-400 truncate text-sm hidden md:block">
-                          {item.artist}
+                          <div className="truncate">{item.artist}</div>
                         </div>
 
                         <div className="flex justify-end pr-2 md:pr-2 gap-2">
                           <SourceLinkButton item={item} />
                           {downloadEnabled ? (
                             <button
-                              onClick={(e) => { e.stopPropagation(); downloadOne(item); }}
+                              onClick={(e) => { e.stopPropagation(); requestDownloadOne(item); }}
                               className="p-2 text-slate-400 dark:text-slate-500 hover:text-sky-500 dark:hover:text-sky-400 hover:bg-sky-50 dark:hover:bg-slate-800 rounded-full transition-colors cursor-pointer"
                               title="下载"
                             >
@@ -825,6 +950,21 @@ export default function Home() {
           onClearCompleted={() => setDownloadTasks(prev => prev.filter(t => t.status === 'downloading' || t.status === 'pending'))}
         />
       ) : null}
+
+      <QualitySelectModal
+        isOpen={Boolean(qualityModal)}
+        title={qualityModal?.mode === "batch" ? "选择批量下载音质" : "选择下载音质"}
+        description={
+          qualityModal?.mode === "batch"
+            ? `本次会把所选音质应用到 ${qualityModal?.jooxCount || 0} 首 JOOX 曲目。`
+            : `为这首 JOOX 歌曲选择一个下载音质。`
+        }
+        options={qualityModal ? collectQualityOptions(getJooxItems(qualityModal.items)) : []}
+        value={selectedQualityValue}
+        onChange={setSelectedQualityValue}
+        onClose={() => setQualityModal(null)}
+        onConfirm={confirmQualityDownload}
+      />
 
       {/* Floating Download Toggle Button (Bottom Right) */}
       <AnimatePresence>
@@ -904,7 +1044,9 @@ export default function Home() {
           <PlayerBar 
             currentMusic={activeMusic}
             isPlaying={playing}
+            isResolving={resolvingMusicId === activeMusic.id}
             onPlayPause={() => {
+              if (resolvingMusicId === activeMusic.id) return;
               if (playing) {
                 audioRef.current?.pause();
                 setPlaying(false);

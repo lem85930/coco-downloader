@@ -35,7 +35,11 @@ interface DetailResponse {
 }
 
 export class QQMp3Provider implements MusicProvider {
-  name = 'qqmp3';
+  name: string;
+
+  constructor(name = 'qqmp3') {
+    this.name = name;
+  }
 
   async search(query: string): Promise<MusicItem[]> {
     try {
@@ -86,7 +90,7 @@ export class QQMp3Provider implements MusicProvider {
         return {
           url: data.data.url,
           type: 'mp3', // Default to mp3 as extension might not be in URL or tricky to parse
-          cover: undefined, // Already have cover from search
+          cover: (data.data as { pic?: string }).pic,
         };
       }
       

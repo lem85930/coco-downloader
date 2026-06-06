@@ -23,6 +23,15 @@ function isRetryableError(error: unknown) {
   );
 }
 
+function parseExtra(value: string | null) {
+  if (!value) return undefined;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
 async function requestAudioStream(url: string, attempt = 0) {
   try {
     const response = await axios.get(url, {
@@ -56,6 +65,7 @@ export async function GET(request: NextRequest) {
   const id = searchParams.get("id");
   const filename = searchParams.get("filename");
   const providerName = searchParams.get("provider") || "gequbao";
+  const extra = parseExtra(searchParams.get("extra"));
 
   if (!id) {
     return NextResponse.json({ error: "Missing id" }, { status: 400 });
@@ -64,7 +74,7 @@ export async function GET(request: NextRequest) {
   try {
     // 1. 获取真实播放地址
     const provider = getProvider(providerName);
-    const playInfo = await provider.getPlayInfo(id);
+    const playInfo = await provider.getPlayInfo(id, extra);
     if (!playInfo || !playInfo.url) {
       return NextResponse.json({ error: "Failed to get url" }, { status: 404 });
     }

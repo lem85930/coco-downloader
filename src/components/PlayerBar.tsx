@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Shuffle, Repeat, Repeat1 } from "lucide-react";
+import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Shuffle, Repeat, Repeat1, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { MusicItem } from "@/types/music";
@@ -20,6 +20,7 @@ interface PlayerBarProps {
   onSeek: (time: number) => void;
   volume: number;
   onVolumeChange: (volume: number) => void;
+  isResolving?: boolean;
 }
 
 export function PlayerBar({
@@ -34,7 +35,8 @@ export function PlayerBar({
   duration,
   onSeek,
   volume,
-  onVolumeChange
+  onVolumeChange,
+  isResolving = false,
 }: PlayerBarProps) {
   const formatTime = (time?: number) => {
     const t = typeof time === "number" ? time : 0;
@@ -104,7 +106,9 @@ export function PlayerBar({
             </div>
             <div className="flex flex-col overflow-hidden min-w-0">
               <h3 className="font-semibold text-slate-800 dark:text-slate-100 truncate text-sm">{currentMusic.title}</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{currentMusic.artist}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                {isResolving ? "正在解析音源..." : currentMusic.artist}
+              </p>
             </div>
           </div>
 
@@ -112,9 +116,10 @@ export function PlayerBar({
           <div className="md:hidden flex items-center gap-4">
             <button 
               onClick={onPlayPause}
+              disabled={isResolving}
               className="w-9 h-9 rounded-full bg-sky-500 text-white flex items-center justify-center shadow-md active:scale-95 transition-transform"
             >
-              {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
+              {isResolving ? <Loader2 className="w-4 h-4 animate-spin" /> : isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current ml-0.5" />}
             </button>
             <button 
               onClick={onNext}
@@ -145,9 +150,10 @@ export function PlayerBar({
 
               <button 
                 onClick={onPlayPause}
-                className="w-10 h-10 rounded-full bg-sky-500 hover:bg-sky-600 text-white flex items-center justify-center transition-transform active:scale-95 shadow-lg shadow-sky-500/30 dark:shadow-none cursor-pointer"
+                disabled={isResolving}
+                className="w-10 h-10 rounded-full bg-sky-500 hover:bg-sky-600 disabled:hover:bg-sky-500 text-white flex items-center justify-center transition-transform active:scale-95 shadow-lg shadow-sky-500/30 dark:shadow-none cursor-pointer disabled:cursor-wait"
               >
-                {isPlaying ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current ml-0.5" />}
+                {isResolving ? <Loader2 className="w-5 h-5 animate-spin" /> : isPlaying ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current ml-0.5" />}
               </button>
               
               <button 
