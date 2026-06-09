@@ -1,9 +1,10 @@
 # coding: utf-8
 from typing import Any
 
-from PyQt5.QtCore import QEasingCurve, QEvent, QPoint, QPropertyAnimation, QThread, QTimer, Qt, pyqtSignal
+from PyQt5.QtCore import QEasingCurve, QEvent, QPoint, QPropertyAnimation, QSize, QThread, QTimer, Qt, pyqtSignal
 from PyQt5.QtGui import QColor, QFont, QPainter, QPixmap
-from PyQt5.QtWidgets import QLabel, QToolButton, QWidget
+from PyQt5.QtWidgets import QLabel, QWidget
+from qfluentwidgets import FluentIcon, TransparentToolButton
 from qfluentwidgets.components.widgets.acrylic_label import AcrylicBrush
 
 from app.common.signal_bus import signalBus
@@ -253,7 +254,7 @@ class PlayingInterface(QWidget):
         self.is_play_bar_visible = False
 
         self.background = BlurCoverBackground(self)
-        self.back_button = QToolButton(self)
+        self.back_button = TransparentToolButton(FluentIcon.ARROW_DOWN.icon(color=Qt.white), self)
         self.song_panel = PlayingSongPanel(self)
         self.lyric_widget = LyricWidget(self)
         self.play_bar = PlayingPagePlayBar(self)
@@ -319,7 +320,7 @@ class PlayingInterface(QWidget):
         super().resizeEvent(event)
         self.background.setGeometry(self.rect())
         self.background.lower()
-        self.back_button.move(22, 18)
+        self.back_button.move(22, 30)
         self.play_bar.resize(self.width(), self.play_bar.height())
         self._place_play_bar()
 
@@ -336,12 +337,12 @@ class PlayingInterface(QWidget):
         self.setObjectName("playingInterface")
         self.setAttribute(Qt.WA_StyledBackground)
         self.setMouseTracking(True)
-        self.back_button.setText("‹")
-        self.back_button.setCursor(Qt.PointingHandCursor)
         self.back_button.setFixedSize(44, 44)
+        self.back_button.setIconSize(QSize(20, 20))
         self.back_button.setStyleSheet(
-            "QToolButton{color:white;font-size:34px;border:none;background:rgba(255,255,255,18);border-radius:22px;}"
-            "QToolButton:hover{background:rgba(255,255,255,32);}"
+            "TransparentToolButton{border-radius:22px;background:rgba(255,255,255,18);}"
+            "TransparentToolButton:hover{background:rgba(255,255,255,32);}"
+            "TransparentToolButton:pressed{background:rgba(255,255,255,44);}"
         )
         self.play_bar.setMouseTracking(True)
         self.play_bar.installEventFilter(self)

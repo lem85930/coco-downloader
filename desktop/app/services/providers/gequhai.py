@@ -7,11 +7,11 @@ from typing import Any
 from bs4 import BeautifulSoup
 from requests import RequestException
 
-from app.models.music import MusicItem, PlayInfo
+from app.models.music import LyricData, MusicItem, PlayInfo
 
 from .base import MusicProvider
 from .http_client import ProviderHttpClient
-from .utils import absolute_url, clean_text, decode_base64_url, extract_ext, is_http_url, quote_id
+from .utils import absolute_url, clean_lyric, clean_text, decode_base64_url, extract_ext, is_http_url, parse_lrc_lines, quote_id
 
 LOGGER = logging.getLogger(__name__)
 REQUEST_TIMEOUT = 15
@@ -148,6 +148,16 @@ class GequhaiProvider(MusicProvider):
 
         cover = app_data.get("mp3_cover") if isinstance(app_data.get("mp3_cover"), str) else None
         return PlayInfo(url=download_url, type=extract_ext(download_url), cover=cover)
+
+    def get_lyric(self, song_id: str, extra: dict[str, Any] | None = None) -> LyricData:
+        play_url = self._get_play_url(song_id, extra)
+        html = self._http.get_text(play_url, headers=SEARCH_HEADERS, timeout=REQUEST_TIMEOUT)
+        soup = BeautifulSoup(html, "html.parser")
+        lyric_node = soup.select_one("#content-lrc2")
+        lyric = clean_lyric(lyric_node.get_text().strip() if lyric_node else "")
+        if "歌词获取失败" in lyric:
+            lyric = ""
+        return LyricData(songid=song_id, provider=self.name, lines=parse_lrc_lines(lyric), lrc=lyric)
 
     def _get_play_url(self, song_id: str, extra: dict[str, Any] | None) -> str:
         if extra and isinstance(extra.get("playUrl"), str) and extra["playUrl"].strip():

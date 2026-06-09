@@ -1,19 +1,22 @@
 # coding: utf-8
+import base64
 import logging
 from typing import Any
 
 from requests import RequestException
 
-from app.models.music import MusicItem, PlayInfo
+from app.models.music import LyricData, MusicItem, PlayInfo
+from app.services.errors import ProviderNetworkError
 
 from .base import MusicProvider
 from .http_client import ProviderHttpClient
-from .utils import clean_text, extract_ext, is_http_url
+from .utils import clean_lyric, clean_text, extract_ext, is_http_url, parse_lrc_lines
 
 LOGGER = logging.getLogger(__name__)
 SEARCH_API_URL = "https://bd-api.kuwo.cn/api/search/music/list"
 CGG_API_URL = "https://kw-api.cenguigui.cn/"
 TIANBAO_API_URL = "https://mobi.kuwo.cn/mobi.s"
+KUWO_LYRIC_URL = "http://mlyric.kuwo.cn/mobi.s"
 REQUEST_TIMEOUT = 20
 DEFAULT_PLAY_LEVEL = "standard"
 DEFAULT_PLAY_BR = "320kmp3"
@@ -84,6 +87,17 @@ class BodianProvider(MusicProvider):
                 cover=fallback_cover,
             )
 
+    def get_lyric(self, song_id: str, extra: dict[str, Any] | None = None) -> LyricData:
+        try:
+            lyric = clean_lyric(self._get_lyric_by_official_api(song_id))
+        except (ProviderNetworkError, RequestException, ValueError):
+            info = self._get_by_cenguigui(song_id)
+            lyric = clean_lyric(info.get("lyric", ""))
+
+        if "歌词获取失败" in lyric:
+            lyric = ""
+        return LyricData(songid=song_id, provider=self.name, lines=parse_lrc_lines(lyric), lrc=lyric)
+
     def _map_item(self, item: Any) -> MusicItem | None:
         if not isinstance(item, dict):
             return None
@@ -114,7 +128,22 @@ class BodianProvider(MusicProvider):
         if not is_http_url(url):
             raise ValueError("Invalid cenguigui url")
         cover = payload.get("pic") if isinstance(payload.get("pic"), str) else None
-        return {"url": url, "cover": cover or "", "bitrate": DEFAULT_PLAY_LEVEL}
+        lyric = payload.get("lyric") if isinstance(payload.get("lyric"), str) else ""
+        return {"url": url, "cover": cover or "", "bitrate": DEFAULT_PLAY_LEVEL, "lyric": lyric}
+
+    def _get_lyric_by_official_api(self, song_id: str) -> str:
+        query = f"type=lyric&req=2&lrcx=1&rid={song_id}&songname=&artist=&corp=kuwo&fromchannel=bodian"
+        encoded_query = base64.b64encode(query.encode("utf-8")).decode("utf-8")
+        data = self._http.get_json(
+            KUWO_LYRIC_URL,
+            params={"f": "bodian", "q": encoded_query, "uid": "-1", "token": ""},
+            timeout=REQUEST_TIMEOUT,
+        )
+        payload = data.get("data", {}) if isinstance(data, dict) else {}
+        content = payload.get("content") if isinstance(payload, dict) else None
+        if not isinstance(content, str) or not content:
+            raise ValueError("Invalid bodian lyric")
+        return base64.b64decode(content).decode("utf-8")
 
     def _get_by_tianbao(self, song_id: str) -> dict[str, str]:
         data = self._http.get_json(

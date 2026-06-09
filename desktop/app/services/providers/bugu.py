@@ -1,18 +1,23 @@
 # coding: utf-8
+import base64
+from html import unescape
 import logging
 import re
+import urllib3
 from typing import Any
 
 from requests import RequestException
 
-from app.models.music import MusicItem, PlayInfo
+from app.models.music import LyricData, MusicItem, PlayInfo
 
 from .base import MusicProvider
 from .http_client import ProviderHttpClient
-from .utils import extract_ext, is_http_url
+from .utils import clean_lyric, extract_ext, is_http_url, parse_lrc_lines
 
 LOGGER = logging.getLogger(__name__)
 REQUEST_TIMEOUT = 20
+KUWO_LYRIC_URL = "http://mlyric.kuwo.cn/mobi.s"
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 SEARCH_HEADERS = {
     "accept": "application/json, text/plain, */*",
@@ -87,6 +92,20 @@ class BuguProvider(MusicProvider):
         cover = extra.get("cover") if extra and isinstance(extra.get("cover"), str) else None
         return PlayInfo(url=url, type=extract_ext(url), cover=cover)
 
+    def get_lyric(self, song_id: str, extra: dict[str, Any] | None = None) -> LyricData:
+        data = self._http.get_json(
+            "https://a.buguyy.top/newapi/geturl2.php",
+            headers=SEARCH_HEADERS,
+            params={"id": song_id},
+            timeout=REQUEST_TIMEOUT,
+            verify=False,
+        )
+        payload = data.get("data", {}) if isinstance(data, dict) else {}
+        lyric = self._clean_detail_lyric(payload.get("lrc") if isinstance(payload, dict) else "")
+        if not lyric and isinstance(payload, dict):
+            lyric = self._get_kuwo_lyric(str(payload.get("rid") or ""))
+        return LyricData(songid=song_id, provider=self.name, lines=parse_lrc_lines(lyric), lrc=lyric)
+
     def _map_item(self, item: Any) -> MusicItem | None:
         if not isinstance(item, dict):
             return None
@@ -104,3 +123,31 @@ class BuguProvider(MusicProvider):
             provider=self.name,
             extra={"cover": cover},
         )
+
+    def _clean_detail_lyric(self, value: Any) -> str:
+        if not isinstance(value, str):
+            return ""
+        lyric = clean_lyric(unescape(value).replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n"))
+        return "" if "歌词获取失败" in lyric else lyric
+
+    def _get_kuwo_lyric(self, song_id: str) -> str:
+        if not song_id:
+            return ""
+        query = f"type=lyric&req=2&lrcx=1&rid={song_id}&songname=&artist=&corp=kuwo&fromchannel=bugu"
+        encoded_query = base64.b64encode(query.encode("utf-8")).decode("utf-8")
+        try:
+            data = self._http.get_json(
+                KUWO_LYRIC_URL,
+                params={"f": "web", "q": encoded_query, "uid": "-1", "token": ""},
+                timeout=REQUEST_TIMEOUT,
+            )
+        except Exception:
+            return ""
+        payload = data.get("data", {}) if isinstance(data, dict) else {}
+        content = payload.get("content") if isinstance(payload, dict) else None
+        if not isinstance(content, str) or not content:
+            return ""
+        try:
+            return clean_lyric(base64.b64decode(content).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            return ""

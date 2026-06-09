@@ -76,12 +76,13 @@ def clean_lyric(value: str) -> str:
 def parse_lrc_lines(lyric: str) -> list[LyricLine]:
     lines: list[LyricLine] = []
     time_pattern = re.compile(r"\[(\d{1,2}):(\d{1,2})(?:\.(\d{1,3}))?]")
+    word_time_pattern = re.compile(r"<\d+,-?\d+>")
 
     for raw_line in lyric.splitlines():
         matches = list(time_pattern.finditer(raw_line))
         if not matches:
             continue
-        text = time_pattern.sub("", raw_line).strip()
+        text = word_time_pattern.sub("", time_pattern.sub("", raw_line)).strip()
         if not text:
             continue
         for match in matches:

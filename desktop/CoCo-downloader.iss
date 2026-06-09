@@ -6,13 +6,13 @@
 #define MyAppURL "https://github.com/markcxx/coco-downloader"
 #define EnvAppVersion GetEnv("APP_VERSION")
 #if EnvAppVersion == ""
-  #define MyAppVersion "0.0.1"
+  #define MyAppVersion "0.0.2"
 #else
   #define MyAppVersion EnvAppVersion
 #endif
 
 [Setup]
-AppId={{9DA8A01E-E207-4ED9-B3A3-07C55DD04071}
+AppId={{3D26D0F7-2C4A-4986-A349-14F3257D08FE}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
